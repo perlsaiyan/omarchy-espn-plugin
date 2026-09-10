@@ -134,7 +134,7 @@ Panel {
     owner: root.barIdentity
     open: root.opened
     triggerMode: root.pinned ? "click" : "hover"
-    contentWidth: card.fittedContentWidth(Style.space(400))
+    contentWidth: card.fittedContentWidth(Style.space(470))
     contentHeight: card.fittedContentHeight(body.implicitHeight, Style.space(620))
 
     Column {
@@ -246,15 +246,40 @@ Panel {
                 implicitHeight: Style.space(18)
 
                 Text {
+                  id: teamName
                   anchors.left: parent.left
                   anchors.verticalCenter: parent.verticalCenter
-                  width: parent.width - Style.space(120)
+                  // Whatever the status column does not claim. The name is the
+                  // one field here that can be arbitrarily long, so it is the
+                  // one that elides.
+                  width: Math.max(Style.space(60),
+                                  parent.width - Style.space(94) - status.width - Style.space(10))
                   text: modelData.name
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.space(13)
                   font.weight: parent.leading ? Font.DemiBold : Font.Normal
                   elide: Text.ElideRight
+                }
+
+                // Per team, not per matchup: a combined "3 playing" cannot say
+                // whether it is you or your opponent who still has a roster
+                // left to come, which is the whole question.
+                Text {
+                  id: status
+                  anchors.left: teamName.right
+                  anchors.leftMargin: Style.space(10)
+                  anchors.verticalCenter: parent.verticalCenter
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.space(11)
+                  text: {
+                    var parts = []
+                    if (modelData.playing > 0) parts.push(modelData.playing + " playing")
+                    if (modelData.yetToPlay > 0) parts.push(modelData.yetToPlay + " to play")
+                    if (parts.length === 0) parts.push("all done")
+                    return parts.join(" · ")
+                  }
                 }
 
                 Text {
@@ -316,17 +341,12 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.space(11)
               elide: Text.ElideRight
-              // Terse on purpose: the long form ("3 on the field · 15 yet to
-              // play · 8h32m of clock left") overruns the card and elides.
+              // The player counts moved up onto the team rows; what is left
+              // here is the one genuinely matchup-level fact — when the last
+              // starter on either side finishes and the result is settled.
               text: {
-                var playing = game.away.playing + game.home.playing
-                var pre = game.away.yetToPlay + game.home.yetToPlay
-                var parts = []
-                if (playing > 0) parts.push(playing + " playing")
-                if (pre > 0) parts.push(pre + " to play")
                 var left = Math.max(game.away.minutesLeft, game.home.minutesLeft)
-                parts.push(left > 0 ? root.clock(left) + " left" : "final")
-                return parts.join("  ·  ")
+                return left > 0 ? root.clock(left) + " of clock left" : "final"
               }
             }
           }
