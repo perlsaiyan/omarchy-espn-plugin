@@ -1,0 +1,5 @@
+# Credentials never belong in the repo. The plugin reads them from
+# ~/.config/omarchy/espn-fantasy.env, which lives outside this tree.
+*.env
+!example.env
+*.json.tmp

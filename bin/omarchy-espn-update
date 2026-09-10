@@ -1,0 +1,111 @@
+#!/bin/bash
+#
+# omarchy:summary=Refresh the ESPN fantasy scoreboard record
+# omarchy:group=espn
+#
+# Fetches the league scoreboard and the live NFL game clocks, folds them into
+# one record, and writes it where the bar widget watches. The panel is a pure
+# display: everything it knows, this script put on disk.
+
+set -euo pipefail
+
+CONFIG="${OMARCHY_ESPN_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/espn-fantasy.env}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/espn"
+STATE_FILE="$STATE_DIR/scoreboard.json"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+
+die() { echo "omarchy-espn-update: $*" >&2; exit 1; }
+
+# A failure still has to reach the bar. The panel reads .error and says so
+# rather than sitting there showing a stale score as though it were live.
+write_error() {
+  mkdir -p "$STATE_DIR"
+  jq -n --arg msg "$1" --arg at "$(date -u +%FT%TZ)" \
+    '{schemaVersion:1, updatedAt:$at, error:$msg, matchups:[]}' >"$STATE_FILE.tmp"
+  mv -f "$STATE_FILE.tmp" "$STATE_FILE"
+  die "$1"
+}
+
+[[ -f "$CONFIG" ]] || die "no config at $CONFIG (copy example.env there and chmod 600)"
+# shellcheck disable=SC1090
+source "$CONFIG"
+
+[[ -n "${LEAGUE_ID:-}" ]] || die "LEAGUE_ID unset in $CONFIG"
+
+# The fantasy season year rolls over in March, not January.
+if [[ -z "${SEASON:-}" ]]; then
+  SEASON=$(date +%Y)
+  [[ $(date +%-m) -lt 3 ]] && SEASON=$((SEASON - 1))
+fi
+TEAM_ID="${TEAM_ID:-0}"
+
+API="https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/$SEASON/segments/0/leagues/$LEAGUE_ID"
+
+# Cookies are sent only when both are set. A public league gets a clean
+# unauthenticated request, which is what makes it work at all.
+auth=()
+if [[ -n "${ESPN_S2:-}" && -n "${SWID:-}" ]]; then
+  auth=(-H "cookie: espn_s2=${ESPN_S2}; SWID=${SWID}")
+fi
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+code=$(curl -sS -o "$tmp/league.json" -w '%{http_code}' --max-time 20 \
+  -H 'accept: application/json' "${auth[@]}" \
+  "$API?view=mScoreboard&view=mMatchupScore&view=mTeam&view=mSettings" 2>"$tmp/curl.err" || true)
+
+case "$code" in
+  200) ;;
+  401|403) write_error "auth: league $LEAGUE_ID is private and the cookies are missing or expired" ;;
+  404) write_error "league $LEAGUE_ID not found for season $SEASON" ;;
+  "")  write_error "network: $(head -c 200 "$tmp/curl.err")" ;;
+  *)   write_error "ESPN returned HTTP $code" ;;
+esac
+
+WEEK="${WEEK_OVERRIDE:-$(jq -r '.scoringPeriodId // 1' "$tmp/league.json")}"
+
+# Best-effort: without live clocks every player just reads as pre-game, which
+# degrades honestly instead of failing the whole refresh.
+curl -sS -o "$tmp/nfl.json" --max-time 15 \
+  'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard' 2>/dev/null \
+  || echo '{"events":[]}' >"$tmp/nfl.json"
+jq -e . "$tmp/nfl.json" >/dev/null 2>&1 || echo '{"events":[]}' >"$tmp/nfl.json"
+
+mkdir -p "$STATE_DIR"
+jq --slurpfile nfl "$tmp/nfl.json" \
+   --argjson leagueId "$LEAGUE_ID" \
+   --argjson week "$WEEK" \
+   --argjson myTeamId "$TEAM_ID" \
+   -f "$LIB/scoreboard.jq" \
+   "$tmp/league.json" >"$tmp/out.json" || write_error "could not parse ESPN payload"
+
+# Keep the outgoing record so the next run has something to diff against.
+PREV_FILE="$STATE_DIR/previous.json"
+[[ -f "$STATE_FILE" ]] && cp -f "$STATE_FILE" "$PREV_FILE"
+mv -f "$tmp/out.json" "$STATE_FILE"
+
+# ------------------------------------------------------------------ notify
+#
+# Only with a team to watch: "somebody somewhere scored" is not worth a
+# desktop interruption, and without TEAM_ID that is all we could say.
+if [[ "${NOTIFY:-1}" != "0" && "$TEAM_ID" != "0" && -f "$PREV_FILE" ]]; then
+  jq -c --slurpfile prev "$PREV_FILE" \
+        --argjson teamId "$TEAM_ID" \
+        --argjson minDelta "${NOTIFY_MIN_DELTA:-0.1}" \
+        -f "$LIB/notify.jq" "$STATE_FILE" 2>/dev/null \
+  | while IFS= read -r n; do
+      [[ -n "$n" ]] || continue
+      headline=$(jq -r '.headline' <<<"$n")
+      body=$(jq -r '.body' <<<"$n")
+      urgency=$(jq -r '.urgency' <<<"$n")
+      rid=$(jq -r '.id' <<<"$n")
+      url=$(jq -r '.url' <<<"$n")
+      # -r coalesces repeats onto one notification; --exec opens the box
+      # score when the notification itself is clicked.
+      omarchy-notification-send -u "$urgency" -r "$rid" -g '' \
+        "$headline" "$body" --exec omarchy-launch-browser "$url" 2>/dev/null || true
+    done
+fi
+
+echo "wrote $STATE_FILE ($(jq -r '.matchups|length' "$STATE_FILE") matchups, week $WEEK)"
