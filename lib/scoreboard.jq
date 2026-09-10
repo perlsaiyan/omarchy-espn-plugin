@@ -115,18 +115,27 @@ gameStates as $games
     | select((.matchupPeriodId // 0) == $week)
     | side(.home) as $home
     | side(.away) as $away
+    # A matchup period is not always a scoring period — in the playoffs one
+    # matchup can span several — so the link carries the matchup's own.
+    | (.matchupPeriodId // $week) as $matchupPeriod
+    | (($home.teamId == $myTeamId) or ($away.teamId == $myTeamId)) as $mine
+    # ESPN resolves teamId against a season, so seasonId is not optional:
+    # without it the box score opens on some other matchup entirely. The
+    # link points at your own team when the matchup is yours.
+    | (if $mine then $myTeamId else $home.teamId end) as $urlTeam
     | {
         id: (.id // 0),
         winner: (.winner // "UNDECIDED"),
         home: $home,
         away: $away,
-        mine: (($home.teamId == $myTeamId) or ($away.teamId == $myTeamId)),
-        # ESPN opens the box score from one side's point of view, so point it
-        # at your own team when this is your matchup.
-        url: (if ($home.teamId == $myTeamId) or ($away.teamId == $myTeamId)
-              then "https://fantasy.espn.com/football/boxscore?leagueId=\($leagueId)&matchupPeriodId=\($week)&scoringPeriodId=\($week)&teamId=\($myTeamId)"
-              else "https://fantasy.espn.com/football/boxscore?leagueId=\($leagueId)&matchupPeriodId=\($week)&scoringPeriodId=\($week)&teamId=\($home.teamId)"
-              end)
+        mine: $mine,
+        url: ("https://fantasy.espn.com/football/boxscore"
+              + "?leagueId=\($leagueId)"
+              + "&seasonId=\($season)"
+              + "&matchupPeriodId=\($matchupPeriod)"
+              + "&scoringPeriodId=\($week)"
+              + "&teamId=\($urlTeam)"
+              + "&view=scoringperiod")
       }
   ]
   # Your own matchup sorts to the top; the rest keep ESPN's order.

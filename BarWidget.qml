@@ -181,7 +181,9 @@ BarWidget {
     onPressed: function(b) {
       if (!root.bar) return
       if (b === Qt.RightButton) root.refresh()
-      else if (b === Qt.MiddleButton) root.bar.run("omarchy-launch-browser " + (panelLoader.item ? panelLoader.item.leagueUrl : ""))
+      // Through the panel's openUrl, which passes argv rather than a shell
+      // string — this URL has one parameter today, but it is the same trap.
+      else if (b === Qt.MiddleButton && panelLoader.item) panelLoader.item.openUrl(panelLoader.item.leagueUrl)
       else root.togglePanel()
     }
   }

@@ -47,8 +47,14 @@ Panel {
 
   function refresh() { if (!updateProc.running) updateProc.running = true }
 
+  // Not bar.run(): that concatenates into `bash -lc <string>`, and a box score
+  // URL is nothing but ampersands — bash splits the command at the first one,
+  // launches the browser with the query truncated to ?leagueId=..., and
+  // backgrounds the rest as gibberish. That is what sent clicks to the wrong
+  // matchup. execArgv passes argv through positional parameters, so the URL
+  // arrives intact and unre-tokenized.
   function openUrl(url) {
-    if (root.bar && url) root.bar.run("omarchy-launch-browser " + url)
+    if (url) Util.execArgv(["omarchy-launch-browser", String(url)])
     if (root.hostWidget) root.hostWidget.close()
   }
 
