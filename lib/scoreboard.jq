@@ -14,6 +14,22 @@ def proTeams: {
 # Bench (20) and IR (21) do not score. Everything else is a starter.
 def isStarter: (.lineupSlotId != 20 and .lineupSlotId != 21);
 
+def slotNames: {
+  "0":"QB","1":"TQB","2":"RB","3":"RB/WR","4":"WR","5":"WR/TE","6":"TE","7":"OP",
+  "8":"DT","9":"DE","10":"LB","11":"DL","12":"CB","13":"S","14":"DB","15":"DP",
+  "16":"D/ST","17":"K","18":"P","19":"HC","20":"BE","21":"IR","23":"FLEX","24":"EDR"
+};
+
+# Slot id order is not lineup order — FLEX is 23, which would sort it below the
+# kicker. This is the order a box score actually lists them in.
+def slotRank: {
+  "0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"23":7,"7":8,
+  "16":9,"17":10,"8":11,"9":12,"10":13,"11":14,"12":15,"13":16,"14":17,"15":18,
+  "18":19,"19":20,"24":21,"20":90,"21":91
+};
+
+def positions: {"1":"QB","2":"RB","3":"WR","4":"TE","5":"K","16":"D/ST"};
+
 # ESPN keeps a week's running score in totalPointsLive and only moves it into
 # totalPoints once the week is finalized — mid-week, totalPoints reads 0.0
 # while the team is plainly scoring. Prefer whichever field is actually
@@ -68,20 +84,33 @@ gameStates as $games
 | def side($s):
     ($s.teamId // 0) as $id
     | ($teams[$id|tostring] // {name:"Team \($id)", abbrev:"", logo:"", wins:0, losses:0, ties:0}) as $meta
-    | [ $s.rosterForCurrentScoringPeriod.entries[]? | select(isStarter) ] as $starters
-    | [ $starters[]
+    | [ $s.rosterForCurrentScoringPeriod.entries[]?
         | (proTeams[(.playerPoolEntry.player.proTeamId // 0)|tostring] // "") as $abbr
         | ($games[$abbr] // {state:"pre", left:60, detail:"", opponent:""}) as $g
         | {
             name: (.playerPoolEntry.player.fullName // "?"),
+            slot: (slotNames[(.lineupSlotId // -1)|tostring] // "?"),
+            rank: (slotRank[(.lineupSlotId // -1)|tostring] // 99),
+            position: (positions[(.playerPoolEntry.player.defaultPositionId // 0)|tostring] // ""),
+            starter: isStarter,
             proTeam: $abbr,
             state: $g.state,
             left: $g.left,
+            # What the player's real game is doing: "Final", "9:11 - 2nd",
+            # "Sun 1:00 PM". Straight from the NFL scoreboard.
+            detail: $g.detail,
+            matchup: $g.opponent,
+            injury: (.playerPoolEntry.player.injuryStatus // .injuryStatus // null),
             # statSourceId 0 is what actually happened, 1 is the projection.
             points: ([ .playerPoolEntry.player.stats[]?
                        | select(.statSourceId == 0 and .scoringPeriodId == $week)
-                       | .appliedTotal ] | first // 0)
-          } ] as $players
+                       | .appliedTotal ] | first // 0),
+            projected: ([ .playerPoolEntry.player.stats[]?
+                          | select(.statSourceId == 1 and .scoringPeriodId == $week)
+                          | .appliedTotal ] | first // 0)
+          } ]
+      | sort_by(.rank) as $roster
+    | [ $roster[] | select(.starter) ] as $players
     | {
         teamId: $id,
         name: $meta.name,
@@ -96,7 +125,8 @@ gameStates as $games
         done: ([ $players[] | select(.state == "post") ] | length),
         # Minutes of real football still standing between this roster and a
         # final score. It is the honest version of "how much time is left".
-        minutesLeft: ([ $players[] | .left ] | add // 0 | round)
+        minutesLeft: ([ $players[] | .left ] | add // 0 | round),
+        roster: $roster
       };
 
 {

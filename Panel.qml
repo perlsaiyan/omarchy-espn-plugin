@@ -53,6 +53,71 @@ Panel {
   // backgrounds the rest as gibberish. That is what sent clicks to the wrong
   // matchup. execArgv passes argv through positional parameters, so the URL
   // arrives intact and unre-tokenized.
+  // The drill-down is addressed by matchup id, not by holding the object:
+  // a refresh rebuilds `matchups` wholesale, and a stored object would freeze
+  // the detail view at the scores it was opened with.
+  property int selectedId: -1
+  readonly property var selected: {
+    if (selectedId < 0) return null
+    for (var i = 0; i < matchups.length; i++)
+      if (matchups[i].id === selectedId) return matchups[i]
+    return null
+  }
+
+  function selectMatchup(m) {
+    if (!m) return
+    root.selectedId = m.id
+    // Drilling in is deliberate engagement, so pin the card open rather than
+    // letting it evaporate when the pointer drifts off.
+    if (root.hostWidget) root.hostWidget.pinned = true
+  }
+
+  function back() { root.selectedId = -1 }
+
+  // Starters of both sides zipped into box-score rows. Slot structures match
+  // in any sane league, but pair by index and tolerate a ragged edge.
+  function starterRows(m) {
+    if (!m) return []
+    function starters(side) {
+      var out = []
+      var r = (side && side.roster) ? side.roster : []
+      for (var i = 0; i < r.length; i++) if (r[i].starter) out.push(r[i])
+      return out
+    }
+    var a = starters(m.away), h = starters(m.home)
+    var rows = []
+    for (var i = 0; i < Math.max(a.length, h.length); i++)
+      rows.push({ slot: (a[i] || h[i]).slot, away: a[i] || null, home: h[i] || null })
+    return rows
+  }
+
+  function benchRows(m) {
+    if (!m) return []
+    function bench(side) {
+      var out = []
+      var r = (side && side.roster) ? side.roster : []
+      for (var i = 0; i < r.length; i++) if (!r[i].starter) out.push(r[i])
+      return out
+    }
+    var a = bench(m.away), h = bench(m.home)
+    var rows = []
+    for (var i = 0; i < Math.max(a.length, h.length); i++)
+      rows.push({ slot: "BE", away: a[i] || null, home: h[i] || null })
+    return rows
+  }
+
+  // A player's real game, said briefly. ESPN's shortDetail is already terse
+  // for live games ("9:11 - 2nd") but verbose pregame ("9/13 - 1:00 PM EDT").
+  function gameLabel(p) {
+    if (!p) return ""
+    var d = String(p.detail || "")
+    if (p.state === "post") return "Final"
+    if (p.state === "in") return d
+    var m = d.match(/([0-9]{1,2}\/[0-9]{1,2}).*?([0-9]{1,2}:[0-9]{2})/)
+    if (m) return m[1] + " " + m[2]
+    return d
+  }
+
   function openUrl(url) {
     if (url) Util.execArgv(["omarchy-launch-browser", String(url)])
     if (root.hostWidget) root.hostWidget.close()
@@ -134,16 +199,18 @@ Panel {
     owner: root.barIdentity
     open: root.opened
     triggerMode: root.pinned ? "click" : "hover"
-    contentWidth: card.fittedContentWidth(Style.space(470))
-    contentHeight: card.fittedContentHeight(body.implicitHeight, Style.space(620))
+    // The box score needs room for two rosters; the league list does not.
+    contentWidth: card.fittedContentWidth(root.selected ? Style.space(700) : Style.space(470))
+    contentHeight: card.fittedContentHeight(body.implicitHeight, Style.space(640))
 
     Column {
       id: body
       width: parent.width
       spacing: Style.space(10)
 
-      // ------------------------------------------------------------ header
+      // ================================================== league list header
       Item {
+        visible: !root.selected
         width: parent.width
         implicitHeight: Math.max(titleCol.implicitHeight, updatedLabel.implicitHeight)
 
@@ -181,9 +248,99 @@ Panel {
         }
       }
 
+      // ======================================================= detail header
+      Item {
+        visible: !!root.selected
+        width: parent.width
+        implicitHeight: backRow.implicitHeight + Style.space(30)
+
+        Item {
+          id: backRow
+          width: parent.width
+          implicitHeight: Style.space(16)
+
+          Text {
+            id: backLink
+            anchors.left: parent.left
+            text: "‹ Back"
+            color: backHover.hovered ? Color.accent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.space(12)
+            HoverHandler { id: backHover }
+            TapHandler { onTapped: root.back() }
+          }
+
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.league ? ("Week " + root.league.week) : ""
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.space(11)
+          }
+
+          Text {
+            anchors.right: parent.right
+            text: "FantasyCast ›"
+            color: castHover2.hovered ? Color.accent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.space(12)
+            font.underline: castHover2.hovered
+            HoverHandler { id: castHover2 }
+            TapHandler { onTapped: root.openUrl(root.leagueUrl) }
+          }
+        }
+
+        // Both teams and the score, mirrored around the centre so each half
+        // reads outward from the matchup the way a box score does.
+        Item {
+          anchors.top: backRow.bottom
+          anchors.topMargin: Style.space(10)
+          width: parent.width
+          implicitHeight: Style.space(20)
+
+          Text {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: (parent.width - Style.space(150)) / 2
+            text: root.selected ? root.selected.away.name : ""
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.space(14)
+            font.weight: Font.DemiBold
+            elide: Text.ElideRight
+          }
+
+          Text {
+            anchors.centerIn: parent
+            width: Style.space(150)
+            horizontalAlignment: Text.AlignHCenter
+            text: root.selected
+              ? root.fmt(root.selected.away.points) + "  —  " + root.fmt(root.selected.home.points)
+              : ""
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.space(14)
+            font.weight: Font.DemiBold
+          }
+
+          Text {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: (parent.width - Style.space(150)) / 2
+            horizontalAlignment: Text.AlignRight
+            text: root.selected ? root.selected.home.name : ""
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.space(14)
+            font.weight: Font.DemiBold
+            elide: Text.ElideRight
+          }
+        }
+      }
+
       PanelSeparator { width: parent.width }
 
-      // ------------------------------------------------------------- error
+      // =============================================================== error
       Text {
         visible: root.errorText !== ""
         width: parent.width
@@ -203,18 +360,15 @@ Panel {
         font.pixelSize: Style.space(12)
       }
 
-      // --------------------------------------------------------- scoreboard
+      // ========================================================= league list
       Repeater {
-        model: root.matchups
+        model: root.selected ? [] : root.matchups
 
         delegate: Rectangle {
           id: game
           required property var modelData
           readonly property var away: modelData.away
           readonly property var home: modelData.home
-          // Once a side is mathematically ahead with the clock gone, the win
-          // bar stops being a forecast and starts being a result.
-          readonly property bool live: (away.playing + home.playing) > 0
 
           width: body.width
           implicitHeight: rows.implicitHeight + Style.space(16)
@@ -226,7 +380,7 @@ Panel {
           border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
 
           HoverHandler { id: gameHover }
-          TapHandler { onTapped: root.openUrl(modelData.url) }
+          TapHandler { onTapped: root.selectMatchup(game.modelData) }
 
           Column {
             id: rows
@@ -249,9 +403,6 @@ Panel {
                   id: teamName
                   anchors.left: parent.left
                   anchors.verticalCenter: parent.verticalCenter
-                  // Whatever the status column does not claim. The name is the
-                  // one field here that can be arbitrarily long, so it is the
-                  // one that elides.
                   width: Math.max(Style.space(60),
                                   parent.width - Style.space(94) - status.width - Style.space(10))
                   text: modelData.name
@@ -309,8 +460,6 @@ Panel {
 
             // ESPN's own win probability, drawn as one bar split between the
             // two teams: the top row owns the left, the bottom row the right.
-            // Two tones rather than a fill on an empty track, so it reads as a
-            // division of a whole instead of a progress meter.
             Item {
               visible: game.away.winProbability !== null && game.away.winProbability !== undefined
               width: rows.width
@@ -341,9 +490,6 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.space(11)
               elide: Text.ElideRight
-              // The player counts moved up onto the team rows; what is left
-              // here is the one genuinely matchup-level fact — when the last
-              // starter on either side finishes and the result is settled.
               text: {
                 var left = Math.max(game.away.minutesLeft, game.home.minutesLeft)
                 return left > 0 ? root.clock(left) + " of clock left" : "final"
@@ -353,9 +499,169 @@ Panel {
         }
       }
 
+      // ================================================== matchup box score
+      Repeater {
+        model: root.selected ? root.boxRows(root.selected) : []
+
+        delegate: Item {
+          required property var modelData
+          readonly property bool isHeader: !!modelData.header
+
+          width: body.width
+          implicitHeight: isHeader ? Style.space(22) : Style.space(19)
+
+          // Section break between the starters and the bench.
+          Text {
+            visible: parent.isHeader
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            text: modelData.header || ""
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.space(10)
+            font.weight: Font.DemiBold
+          }
+
+          Rectangle {
+            visible: parent.isHeader
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: Style.space(4)
+            width: parent.width - Style.space(46)
+            height: 1
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+          }
+
+          Item {
+            visible: !parent.isHeader
+            anchors.fill: parent
+
+            // The lineup slot is the spine: both rosters mirror outward from
+            // it, so the two numbers being compared sit side by side.
+            Text {
+              id: slotLabel
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(52)
+              horizontalAlignment: Text.AlignHCenter
+              text: modelData.slot || ""
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.space(10)
+            }
+
+            // ---------------------------------------------------- away side
+            Text {
+              id: awayPts
+              anchors.right: slotLabel.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(42)
+              horizontalAlignment: Text.AlignRight
+              text: modelData.away ? root.fmt(modelData.away.points) : ""
+              color: root.playerColor(modelData.away)
+              font.family: root.fontFamily
+              font.pixelSize: Style.space(12)
+              font.weight: modelData.away && modelData.away.state === "in" ? Font.DemiBold : Font.Normal
+            }
+
+            Text {
+              id: awayProj
+              anchors.right: awayPts.left
+              anchors.rightMargin: Style.space(6)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(40)
+              horizontalAlignment: Text.AlignRight
+              text: modelData.away ? root.fmt(modelData.away.projected) : ""
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.space(10)
+            }
+
+            Column {
+              anchors.left: parent.left
+              anchors.right: awayProj.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: 0
+
+              Text {
+                width: parent.width
+                text: modelData.away ? modelData.away.name : ""
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.space(12)
+                elide: Text.ElideRight
+              }
+              Text {
+                width: parent.width
+                text: modelData.away ? root.playerNote(modelData.away) : ""
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.space(9)
+                elide: Text.ElideRight
+              }
+            }
+
+            // ---------------------------------------------------- home side
+            Text {
+              id: homePts
+              anchors.left: slotLabel.right
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(42)
+              horizontalAlignment: Text.AlignLeft
+              text: modelData.home ? root.fmt(modelData.home.points) : ""
+              color: root.playerColor(modelData.home)
+              font.family: root.fontFamily
+              font.pixelSize: Style.space(12)
+              font.weight: modelData.home && modelData.home.state === "in" ? Font.DemiBold : Font.Normal
+            }
+
+            Text {
+              id: homeProj
+              anchors.left: homePts.right
+              anchors.leftMargin: Style.space(6)
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(40)
+              horizontalAlignment: Text.AlignLeft
+              text: modelData.home ? root.fmt(modelData.home.projected) : ""
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.space(10)
+            }
+
+            Column {
+              anchors.left: homeProj.right
+              anchors.leftMargin: Style.space(8)
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: 0
+
+              Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignRight
+                text: modelData.home ? modelData.home.name : ""
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.space(12)
+                elide: Text.ElideRight
+              }
+              Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignRight
+                text: modelData.home ? root.playerNote(modelData.home) : ""
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.space(9)
+                elide: Text.ElideRight
+              }
+            }
+          }
+        }
+      }
+
       PanelSeparator { width: parent.width; visible: root.matchups.length > 0 }
 
-      // ------------------------------------------------------------ footer
+      // ============================================================== footer
       Item {
         width: parent.width
         implicitHeight: Style.space(20)
@@ -363,6 +669,7 @@ Panel {
         Text {
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
+          visible: !root.selected
           text: "Open FantasyCast"
           color: castHover.hovered ? Color.accent : root.dim
           font.family: root.fontFamily
@@ -374,14 +681,65 @@ Panel {
         }
 
         Text {
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          visible: !!root.selected
+          text: "Open box score on ESPN"
+          color: boxHover.hovered ? Color.accent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.space(12)
+          font.underline: boxHover.hovered
+
+          HoverHandler { id: boxHover }
+          TapHandler { onTapped: root.openUrl(root.selected ? root.selected.url : "") }
+        }
+
+        Text {
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: "click a matchup for its box score"
+          text: root.selected ? (root.record && root.record.updatedAt ? root.ago(root.record.updatedAt) : "")
+                              : "click a matchup for its box score"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.space(10)
         }
       }
     }
+  }
+
+  // Starters, then a Bench header, then the bench — one flat model so the
+  // whole box score is a single Repeater rather than three that have to be
+  // kept in step.
+  function boxRows(m) {
+    var out = []
+    var s = starterRows(m)
+    for (var i = 0; i < s.length; i++) out.push(s[i])
+    var b = benchRows(m)
+    if (b.length > 0) {
+      out.push({ header: "BENCH" })
+      for (var j = 0; j < b.length; j++) out.push(b[j])
+    }
+    return out
+  }
+
+  // Live players carry the accent, finished ones read normally, and anyone
+  // yet to kick off stays dim — so a glance down the column says who is
+  // still capable of changing the score.
+  function playerColor(p) {
+    if (!p) return root.dim
+    if (p.state === "in") return Color.accent
+    if (p.state === "post") return root.foreground
+    return root.dim
+  }
+
+  function playerNote(p) {
+    if (!p) return ""
+    var bits = []
+    if (p.proTeam) bits.push(p.proTeam)
+    var g = root.gameLabel(p)
+    if (g) bits.push(g)
+    if (p.injury && p.injury !== "ACTIVE" && p.injury !== "NORMAL")
+      bits.push(String(p.injury).slice(0, 3))
+    return bits.join(" · ")
   }
 }
