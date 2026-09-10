@@ -48,7 +48,7 @@ no cookies when `ESPN_S2`/`SWID` are empty. Check yours:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' \
-  "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/leagues/<LEAGUE_ID>?view=mSettings"
+  "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/leagues/1234567?view=mSettings"
 ```
 
 `200` is public. `401`/`403` is private: open a logged-in espn.com tab,
@@ -59,7 +59,7 @@ error, that is what happened.
 ## Finding your `TEAM_ID`
 
 ```bash
-curl -s "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/leagues/<LEAGUE_ID>?view=mTeam" \
+curl -s "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2026/segments/0/leagues/1234567?view=mTeam" \
   | jq -r '.teams[] | "\(.id)\t\(.name)"'
 ```
 
