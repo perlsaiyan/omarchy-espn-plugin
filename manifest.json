@@ -18,12 +18,12 @@
     "aliases": ["espn", "fantasy", "football"],
     "allowMultiple": false,
     "defaults": {
-      "refreshIntervalSec": 120,
+      "refreshIntervalSec": 60,
       "hoverToOpen": true,
       "hoverDelayMs": 220
     },
     "schema": [
-      { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 30, "max": 1800, "step": 30, "defaultValue": 120, "description": "How often to re-poll ESPN. 120s keeps up with live scoring without hammering the API." },
+      { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 30, "max": 1800, "step": 30, "defaultValue": 60, "description": "How often to re-poll ESPN. 60s keeps a notification within about a minute of a scoring play." },
       { "key": "hoverToOpen", "type": "boolean", "label": "Open on hover", "defaultValue": true, "description": "When off, the scoreboard opens on click only." },
       { "key": "hoverDelayMs", "type": "integer", "label": "Hover delay (ms)", "min": 0, "max": 1500, "step": 20, "defaultValue": 220, "description": "How long the pointer must rest on the icon before the scoreboard appears." }
     ]

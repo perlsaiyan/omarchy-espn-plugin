@@ -30,7 +30,7 @@ Panel {
   readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace("file://", "")
   readonly property int refreshIntervalSec: {
     var v = root.settings ? root.settings.refreshIntervalSec : undefined
-    return v === undefined ? 120 : Math.max(30, Number(v))
+    return v === undefined ? 60 : Math.max(30, Number(v))
   }
 
   property var record: ({})

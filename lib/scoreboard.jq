@@ -14,6 +14,18 @@ def proTeams: {
 # Bench (20) and IR (21) do not score. Everything else is a starter.
 def isStarter: (.lineupSlotId != 20 and .lineupSlotId != 21);
 
+# ESPN keeps a week's running score in totalPointsLive and only moves it into
+# totalPoints once the week is finalized — mid-week, totalPoints reads 0.0
+# while the team is plainly scoring. Prefer whichever field is actually
+# carrying the number, so live and final weeks both come out right.
+def livePoints($s; $week):
+  ($s.totalPointsLive // 0) as $live
+  | ((($s.pointsByScoringPeriod // {})[$week | tostring]) // 0) as $byPeriod
+  | ($s.totalPoints // 0) as $total
+  | if $live != 0 then $live
+    elif $byPeriod != 0 then $byPeriod
+    else $total end;
+
 # One entry per pro team: what its NFL game is doing right now.
 #   state: "pre" | "in" | "post"
 #   left:  minutes of game clock still to be played
@@ -76,7 +88,7 @@ gameStates as $games
         abbrev: $meta.abbrev,
         logo: $meta.logo,
         record: "\($meta.wins)-\($meta.losses)" + (if $meta.ties > 0 then "-\($meta.ties)" else "" end),
-        points: ($s.totalPoints // 0),
+        points: livePoints($s; $week),
         projected: ($s.totalProjectedPointsLive // $s.totalPoints // 0),
         winProbability: ($s.winProbability // null),
         playing: ([ $players[] | select(.state == "in") ] | length),
