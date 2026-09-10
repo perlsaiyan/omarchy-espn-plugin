@@ -109,7 +109,12 @@ gameStates as $games
         home: $home,
         away: $away,
         mine: (($home.teamId == $myTeamId) or ($away.teamId == $myTeamId)),
-        url: "https://fantasy.espn.com/football/boxscore?leagueId=\($leagueId)&matchupPeriodId=\($week)&scoringPeriodId=\($week)&teamId=\($home.teamId)"
+        # ESPN opens the box score from one side's point of view, so point it
+        # at your own team when this is your matchup.
+        url: (if ($home.teamId == $myTeamId) or ($away.teamId == $myTeamId)
+              then "https://fantasy.espn.com/football/boxscore?leagueId=\($leagueId)&matchupPeriodId=\($week)&scoringPeriodId=\($week)&teamId=\($myTeamId)"
+              else "https://fantasy.espn.com/football/boxscore?leagueId=\($leagueId)&matchupPeriodId=\($week)&scoringPeriodId=\($week)&teamId=\($home.teamId)"
+              end)
       }
   ]
   # Your own matchup sorts to the top; the rest keep ESPN's order.
